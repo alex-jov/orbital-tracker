@@ -1,0 +1,13 @@
+{
+  "name": "orbital-tracker",
+  "version": "1.0.0",
+  "description": "Real-time 3D satellite tracker built with Three.js and satellite.js",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx serve . -l 3000",
+    "lint": "npx eslint src/"
+  },
+  "keywords": ["satellite", "tracker", "three.js", "3d", "space", "orbit"],
+  "license": "MIT"
+}

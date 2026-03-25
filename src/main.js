@@ -1,49 +1,120 @@
+import { checkWebGL, CONFIG } from './utils.js';
 import * as Globe from './globe.js';
 import * as Satellites from './satellites.js';
 import * as UI from './ui.js';
 
+// ── WebGL check ────────────────────────────────────────────────────────────────
+
+if (!checkWebGL()) {
+  const el = document.getElementById('loading');
+  if (el) {
+    el.querySelector('.loading-title').textContent = 'WebGL Required';
+    el.querySelector('.loading-sub').textContent =
+      'Your browser does not support WebGL. Please use a modern browser.';
+    el.querySelector('.loading-ring').style.display = 'none';
+  }
+  throw new Error('WebGL not supported');
+}
+
+// ── Init scene ─────────────────────────────────────────────────────────────────
+
 const canvas = document.getElementById('globe-canvas');
-const { scene } = Globe.init(canvas);
+let initError = false;
 
-Satellites.initRenderer(scene);
+try {
+  Globe.init(canvas);
+} catch (e) {
+  initError = true;
+  console.error('Failed to initialize globe:', e);
+}
 
-const loadingText = document.getElementById('loading-text');
-loadingText.textContent = 'Fetching satellite data...';
+if (!initError) {
+  const scene = Globe.getScene();
+  Satellites.initRenderer(scene);
 
-// Fetch 'active' group = all active satellites (~10k), plus specific groups for category tagging
-Satellites.fetchSatellites(['active', 'stations', 'visual', 'weather', 'science', 'gps-ops', 'starlink']).then((count) => {
-  console.log(`Loaded ${count} satellites`);
-  loadingText.textContent = `${count} satellites loaded`;
+  const loadingText = document.getElementById('loading-text');
 
-  UI.init(scene);
+  // Fetch with progress reporting
+  loadingText.textContent = 'Fetching satellite data...';
 
-  Satellites.update(new Date());
+  Satellites.fetchSatellites(
+    ['active', 'stations', 'visual', 'weather', 'science', 'gps-ops', 'starlink'],
+    (fetched, total, group, count) => {
+      loadingText.textContent = `Loading ${group}... (${fetched}/${total})`;
+    }
+  ).then((count) => {
+    loadingText.textContent = `${count} satellites loaded`;
 
-  setTimeout(() => UI.hideLoading(), 500);
+    UI.init(scene);
 
-  let frameCount = 0;
+    Satellites.update(UI.getSimTime());
 
-  function animate() {
+    setTimeout(() => UI.hideLoading(), 500);
+
+    // ── Animation loop (time-based, no frameCount overflow) ────────────────
+
+    let lastPositionUpdate = 0;
+    let lastTelemetryUpdate = 0;
+    let lastLabelUpdate = 0;
+    let lastSunUpdate = 0;
+
+    // Initial sun position
+    Globe.updateSunPosition(UI.getSimTime());
+
+    function animate(now) {
+      requestAnimationFrame(animate);
+
+      const simTime = UI.getSimTime();
+
+      // Update positions at configured interval
+      if (now - lastPositionUpdate >= CONFIG.UPDATE_POSITIONS_MS) {
+        lastPositionUpdate = now;
+        Satellites.update(simTime);
+      }
+
+      // Update sun position every 10s (doesn't change fast)
+      if (now - lastSunUpdate >= 10000) {
+        lastSunUpdate = now;
+        Globe.updateSunPosition(simTime);
+      }
+
+      // Update telemetry panel
+      if (now - lastTelemetryUpdate >= CONFIG.UPDATE_TELEMETRY_MS) {
+        lastTelemetryUpdate = now;
+        UI.updatePanel();
+      }
+
+      // Update labels
+      if (now - lastLabelUpdate >= CONFIG.UPDATE_LABELS_MS) {
+        lastLabelUpdate = now;
+        UI.updateLabels();
+      }
+
+      Globe.render();
+    }
+
     requestAnimationFrame(animate);
 
-    // Update positions every 60 frames (~1s at 60fps)
-    if (frameCount % 60 === 0) {
-      Satellites.update(new Date());
+    // ── Auto-refresh TLE data ──────────────────────────────────────────────
+
+    setInterval(() => {
+      console.log('Auto-refreshing TLE data...');
+      Satellites.fetchSatellites(
+        ['active', 'stations', 'visual', 'weather', 'science', 'gps-ops', 'starlink']
+      ).then((count) => {
+        console.log(`TLE refresh complete: ${count} satellites`);
+        const badge = document.getElementById('sat-total-badge');
+        if (badge) badge.textContent = count + ' objects';
+      }).catch((e) => {
+        console.warn('TLE refresh failed:', e.message);
+      });
+    }, CONFIG.TLE_REFRESH_MS);
+
+  }).catch((e) => {
+    console.error('Fatal: failed to load satellites', e);
+    const loadingText = document.getElementById('loading-text');
+    if (loadingText) {
+      loadingText.textContent = 'Failed to load satellite data. Please reload.';
     }
-
-    // Update telemetry panel every 10 frames
-    if (frameCount % 10 === 0) {
-      UI.updatePanel();
-    }
-
-    // Update satellite name labels based on zoom
-    if (frameCount % 5 === 0) {
-      UI.updateLabels();
-    }
-
-    Globe.render();
-    frameCount++;
-  }
-
-  animate();
-});
+  });
+}

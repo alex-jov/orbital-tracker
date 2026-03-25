@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Utils Tests</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #111; color: #eee; }
+    .pass { color: #34d399; }
+    .fail { color: #f87171; font-weight: bold; }
+    h1 { font-size: 16px; margin-bottom: 12px; }
+    .result { margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <h1>Orbital Tracker — Utils Unit Tests</h1>
+  <div id="results"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/satellite.js@5.0.0/dist/satellite.min.js"></script>
+  <script type="module">
+    import {
+      CONFIG, GLOBE_RADIUS, EARTH_RADIUS_KM, DEG2RAD, RAD2DEG,
+      geoTo3D, geoToSurface, computeSpeed, checkWebGL,
+      formatCoord, formatAlt, formatSpeed, getOrbitRegime,
+      debounce, throttle, getSunDirection
+    } from '../src/utils.js';
+
+    const results = document.getElementById('results');
+    let passed = 0, failed = 0;
+
+    function assert(name, condition) {
+      const el = document.createElement('div');
+      el.className = 'result';
+      if (condition) {
+        el.innerHTML = `<span class="pass">PASS</span> ${name}`;
+        passed++;
+      } else {
+        el.innerHTML = `<span class="fail">FAIL</span> ${name}`;
+        failed++;
+      }
+      results.appendChild(el);
+    }
+
+    function approx(a, b, eps = 0.01) { return Math.abs(a - b) < eps; }
+
+    // CONFIG
+    assert('CONFIG exists', typeof CONFIG === 'object');
+    assert('GLOBE_RADIUS = 100', GLOBE_RADIUS === 100);
+    assert('EARTH_RADIUS_KM = 6371', EARTH_RADIUS_KM === 6371);
+    assert('DEG2RAD correct', approx(DEG2RAD, Math.PI / 180));
+    assert('RAD2DEG correct', approx(RAD2DEG, 180 / Math.PI));
+
+    // geoTo3D
+    const origin = geoTo3D(0, 0, 0);
+    assert('geoTo3D(0,0,0) radius = GLOBE_RADIUS', approx(origin.length(), GLOBE_RADIUS, 0.1));
+
+    const northPole = geoTo3D(90, 0, 0);
+    assert('geoTo3D(90,0,0) is at north pole (y ~ 100)', approx(northPole.y, GLOBE_RADIUS, 0.1));
+
+    const withAlt = geoTo3D(0, 0, EARTH_RADIUS_KM);
+    assert('geoTo3D with altitude doubles radius', approx(withAlt.length(), GLOBE_RADIUS * 2, 0.1));
+
+    // geoToSurface
+    const surface = geoToSurface(45, 90);
+    assert('geoToSurface length = GLOBE_RADIUS', approx(surface.length(), GLOBE_RADIUS, 0.1));
+
+    // computeSpeed
+    assert('computeSpeed({x:3,y:4,z:0}) = 5', approx(computeSpeed({x:3,y:4,z:0}), 5));
+    assert('computeSpeed({x:1,y:1,z:1}) ~ 1.732', approx(computeSpeed({x:1,y:1,z:1}), Math.sqrt(3)));
+
+    // checkWebGL
+    assert('checkWebGL returns boolean', typeof checkWebGL() === 'boolean');
+
+    // formatCoord
+    assert('formatCoord positive', formatCoord(48.8566, 'N', 'S') === '48.8566\u00B0 N');
+    assert('formatCoord negative', formatCoord(-73.9857, 'E', 'W') === '73.9857\u00B0 W');
+
+    // formatAlt
+    assert('formatAlt', formatAlt(408.5) === '408.5 km');
+
+    // formatSpeed
+    assert('formatSpeed', formatSpeed(7.66) === '27576 km/h');
+
+    // getOrbitRegime
+    assert('LEO at 400km', getOrbitRegime(400) === 'LEO');
+    assert('MEO at 20200km', getOrbitRegime(20200) === 'MEO');
+    assert('GEO at 35786km', getOrbitRegime(35786) === 'GEO');
+    assert('LEO at 1999km', getOrbitRegime(1999) === 'LEO');
+    assert('MEO at 2000km', getOrbitRegime(2000) === 'MEO');
+
+    // getSunDirection
+    const sunDir = getSunDirection(new Date('2024-06-21T12:00:00Z'));
+    assert('getSunDirection returns unit vector', approx(sunDir.length(), 1.0, 0.01));
+
+    const sunWinter = getSunDirection(new Date('2024-12-21T12:00:00Z'));
+    assert('Sun Y component changes with season', Math.abs(sunDir.y - sunWinter.y) > 0.1);
+
+    // CONFIG category colors
+    assert('Category colors defined', Object.keys(CONFIG.CATEGORY_COLORS).length >= 6);
+    assert('Stations color is red-ish', CONFIG.CATEGORY_COLORS.stations === 0xff6b6b);
+
+    // Summary
+    const summary = document.createElement('div');
+    summary.style.marginTop = '16px';
+    summary.style.fontSize = '14px';
+    summary.innerHTML = `<strong>${passed} passed, ${failed} failed</strong> out of ${passed + failed} tests`;
+    summary.style.color = failed > 0 ? '#f87171' : '#34d399';
+    results.appendChild(summary);
+  </script>
+</body>
+</html>

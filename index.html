@@ -3,44 +3,73 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Real-time 3D satellite tracker showing 10,000+ active satellites orbiting Earth with live telemetry data.">
+  <meta name="theme-color" content="#06080f">
+  <meta property="og:title" content="Orbital Tracker">
+  <meta property="og:description" content="Real-time 3D satellite tracker showing 10,000+ active satellites orbiting Earth.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰</text></svg>">
+  <link rel="manifest" href="manifest.json">
   <title>Orbital Tracker</title>
   <link rel="stylesheet" href="style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <noscript><style>#loading .loading-sub::after{content:"JavaScript is required to run this app."}</style></noscript>
 </head>
 <body>
-  <canvas id="globe-canvas"></canvas>
+  <canvas id="globe-canvas" aria-label="3D satellite globe visualization"></canvas>
+
+  <!-- Skip to main content (a11y) -->
+  <a href="#topbar" class="sr-only focus-visible">Skip to controls</a>
 
   <!-- Top bar -->
-  <header id="topbar">
+  <header id="topbar" role="banner">
     <div class="topbar-left">
       <div class="logo-group">
-        <div class="logo">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(30 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(-30 12 12)"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg>
+        <div class="logo" aria-label="Orbital Tracker">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(30 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(-30 12 12)"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg>
           <span>ORBITAL TRACKER</span>
         </div>
-        <div class="topbar-badge" id="sat-total-badge">--</div>
+        <div class="topbar-badge" id="sat-total-badge" aria-live="polite">--</div>
       </div>
     </div>
+
     <div class="topbar-center">
-      <div class="filter-bar">
-        <button class="filter-chip active" data-cat="all">All</button>
-        <button class="filter-chip" data-cat="stations">Stations</button>
-        <button class="filter-chip" data-cat="starlink">Starlink</button>
-        <button class="filter-chip" data-cat="visual">Brightest</button>
-        <button class="filter-chip" data-cat="weather">Weather</button>
-        <button class="filter-chip" data-cat="science">Science</button>
-        <button class="filter-chip" data-cat="gps-ops">GPS</button>
-        <button class="filter-chip" data-cat="active">Other</button>
+      <!-- Search -->
+      <div id="search-container" class="search-container" role="search" aria-label="Search satellites">
+        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input
+          type="text"
+          id="search-input"
+          class="search-input"
+          placeholder="Search satellites... (/ to focus)"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="Search satellites by name"
+          aria-expanded="false"
+          aria-controls="search-results"
+          role="combobox"
+        >
+        <button id="search-clear" class="search-clear" aria-label="Clear search" style="display:none">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+        <div id="search-results" class="search-results hidden" role="listbox" aria-label="Search results"></div>
+      </div>
+
+      <!-- Filter bar -->
+      <div id="filter-bar" class="filter-bar" role="tablist" aria-label="Satellite category filter">
+        <!-- Chips generated dynamically from CONFIG by ui.js -->
       </div>
     </div>
+
     <div class="topbar-right">
-      <div class="topbar-clock" id="utc-clock">--:--:-- UTC</div>
+      <div class="topbar-clock" id="utc-clock" aria-live="off" aria-label="UTC time">--:--:-- UTC</div>
     </div>
   </header>
 
   <!-- Telemetry panel (right) -->
-  <aside id="telemetry">
+  <aside id="telemetry" aria-label="Satellite telemetry" role="complementary">
     <div class="telem-header">
       <h2 id="sat-name">No selection</h2>
       <span class="telem-norad" id="sat-norad"></span>
@@ -48,19 +77,19 @@
     <div class="telem-grid">
       <div class="telem-card">
         <div class="telem-label">LAT</div>
-        <div class="telem-value mono" id="sat-lat">--</div>
+        <div class="telem-value mono" id="sat-lat" aria-label="Latitude">--</div>
       </div>
       <div class="telem-card">
         <div class="telem-label">LON</div>
-        <div class="telem-value mono" id="sat-lon">--</div>
+        <div class="telem-value mono" id="sat-lon" aria-label="Longitude">--</div>
       </div>
       <div class="telem-card">
         <div class="telem-label">ALT</div>
-        <div class="telem-value mono" id="sat-alt">--</div>
+        <div class="telem-value mono" id="sat-alt" aria-label="Altitude">--</div>
       </div>
       <div class="telem-card">
         <div class="telem-label">SPEED</div>
-        <div class="telem-value mono" id="sat-speed">--</div>
+        <div class="telem-value mono" id="sat-speed" aria-label="Speed">--</div>
       </div>
     </div>
     <div class="telem-section">
@@ -76,32 +105,80 @@
         <span class="telem-row-label">Category</span>
         <span class="telem-row-value" id="sat-category">--</span>
       </div>
+      <div class="telem-row">
+        <span class="telem-row-label">Orbit</span>
+        <span class="telem-row-value" id="sat-regime">--</span>
+      </div>
+      <div class="telem-row">
+        <span class="telem-row-label">Next pass</span>
+        <span class="telem-row-value" id="sat-next-pass">--</span>
+      </div>
     </div>
     <div class="telem-footer">
-      <a id="sat-info-link" class="telem-link" href="#" target="_blank" rel="noopener noreferrer">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      <a id="sat-info-link" class="telem-link" href="#" target="_blank" rel="noopener noreferrer" aria-label="View satellite details on N2YO">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
         More info on N2YO
       </a>
     </div>
   </aside>
 
   <!-- Bottom controls -->
-  <div id="bottombar">
-    <button class="bottom-btn" id="btn-orbits">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="10" ry="4"/></svg>
-      Orbit
-    </button>
-    <button class="bottom-btn" id="btn-locate">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
-      Locate me
-    </button>
+  <div id="bottombar" role="toolbar" aria-label="Globe controls">
+    <!-- Time controls -->
+    <div class="bottom-group" role="group" aria-label="Time simulation">
+      <button class="bottom-btn" id="btn-time-pause" aria-label="Pause time">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+        <span class="btn-label">Pause</span>
+      </button>
+      <button class="bottom-btn" id="btn-time-speed" aria-label="Change time speed">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <span class="btn-label">1x</span>
+      </button>
+      <button class="bottom-btn" id="btn-time-reset" aria-label="Reset to real time">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        <span class="btn-label">Reset</span>
+      </button>
+    </div>
+
+    <div class="bottom-separator" aria-hidden="true"></div>
+
+    <!-- Satellite controls -->
+    <div class="bottom-group" role="group" aria-label="Satellite controls">
+      <button class="bottom-btn" id="btn-orbits" disabled aria-disabled="true" aria-label="Toggle orbit path">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="4"/></svg>
+        <span class="btn-label">Orbit</span>
+      </button>
+      <button class="bottom-btn" id="btn-locate" aria-label="Show your location on the globe">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
+        <span class="btn-label">Locate me</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Color legend -->
+  <div id="color-legend" class="color-legend" aria-label="Satellite category colors"></div>
+
+  <!-- Keyboard shortcuts hint -->
+  <div id="shortcuts-hint" class="shortcuts-hint" aria-hidden="true">
+    <span><kbd>/</kbd> Search</span>
+    <span><kbd>Space</kbd> Pause</span>
+    <span><kbd>O</kbd> Orbit</span>
+    <span><kbd>Esc</kbd> Deselect</span>
+  </div>
+
+  <!-- Error overlay -->
+  <div id="error-overlay" class="error-overlay hidden" role="alert">
+    <div class="error-content">
+      <p class="error-text">An error occurred.</p>
+      <button onclick="location.reload()" class="error-btn">Reload</button>
+    </div>
   </div>
 
   <!-- Loading -->
-  <div id="loading">
+  <div id="loading" role="status" aria-live="polite">
     <div class="loading-content">
       <div class="loading-ring">
-        <svg width="48" height="48" viewBox="0 0 48 48">
+        <svg width="48" height="48" viewBox="0 0 48 48" aria-hidden="true">
           <circle cx="24" cy="24" r="20" fill="none" stroke="rgba(79,172,254,0.15)" stroke-width="3"/>
           <circle cx="24" cy="24" r="20" fill="none" stroke="#4facfe" stroke-width="3" stroke-dasharray="40 86" stroke-linecap="round" class="loading-arc"/>
         </svg>
