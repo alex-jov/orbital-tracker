@@ -25,6 +25,8 @@ body {
   color: var(--text);
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .mono { font-family: var(--mono); }
@@ -79,6 +81,9 @@ button:focus:not(:focus-visible) { outline: none; }
   align-items: center;
   justify-content: space-between;
   padding: 0 14px;
+  padding-top: env(safe-area-inset-top, 0);
+  padding-left: max(14px, env(safe-area-inset-left, 0));
+  padding-right: max(14px, env(safe-area-inset-right, 0));
   background: linear-gradient(180deg, rgba(6,8,15,0.9) 0%, transparent 100%);
   z-index: 20;
   pointer-events: none;
@@ -454,7 +459,7 @@ button:focus:not(:focus-visible) { outline: none; }
 /* === Bottom bar === */
 #bottombar {
   position: fixed;
-  bottom: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -630,16 +635,10 @@ button:focus:not(:focus-visible) { outline: none; }
     gap: 4px;
   }
 
-  .search-container {
-    width: 180px;
-  }
-
-  .search-container:focus-within {
-    width: 220px;
-  }
+  .search-container { width: 180px; }
+  .search-container:focus-within { width: 220px; }
 
   .logo span { display: none; }
-
   .shortcuts-hint { display: none; }
   .color-legend { display: none; }
 }
@@ -648,13 +647,16 @@ button:focus:not(:focus-visible) { outline: none; }
 @media (max-width: 600px) {
   #topbar {
     height: auto;
+    padding: 6px 8px;
+    gap: 4px;
     flex-wrap: wrap;
-    padding: 8px 10px;
-    gap: 6px;
-    background: rgba(6,8,15,0.95);
+    background: rgba(6,8,15,0.92);
+    backdrop-filter: blur(12px);
   }
 
-  .topbar-left { order: 1; }
+  .topbar-left {
+    order: 1;
+  }
 
   .topbar-right {
     order: 2;
@@ -664,55 +666,206 @@ button:focus:not(:focus-visible) { outline: none; }
   .topbar-center {
     order: 3;
     width: 100%;
-    flex-direction: column;
+    flex-direction: row;
     gap: 6px;
+    overflow: hidden;
   }
 
-  .search-container,
+  .logo-group { gap: 0; }
+
+  .topbar-badge {
+    font-size: 9px;
+    padding: 1px 6px;
+  }
+
+  /* Search: compact on mobile, only icon visible by default */
+  .search-container {
+    width: 36px;
+    min-width: 36px;
+    padding: 0 8px;
+    border-radius: 18px;
+    transition: width 0.25s ease, border-color 0.15s;
+    overflow: hidden;
+  }
+
+  .search-container .search-input {
+    opacity: 0;
+    width: 0;
+    padding: 6px 0;
+    transition: opacity 0.2s, width 0.25s;
+  }
+
   .search-container:focus-within {
     width: 100%;
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    top: 6px;
+    z-index: 30;
+    background: var(--surface-solid);
   }
 
-  .filter-bar {
+  .search-container:focus-within .search-input {
+    opacity: 1;
     width: 100%;
-    justify-content: flex-start;
+    padding: 6px 8px;
   }
 
-  #telemetry {
-    top: auto;
-    bottom: 70px;
-    right: 8px;
-    left: 8px;
-    width: auto;
+  .search-results {
+    max-height: 200px;
   }
 
-  #bottombar {
-    bottom: 8px;
-    left: 8px;
-    right: 8px;
-    transform: none;
-    justify-content: center;
-    flex-wrap: wrap;
+  /* Filter bar: scrollable single row, no wrapping */
+  .filter-bar {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 16px;
+    padding: 2px;
+    gap: 2px;
   }
 
-  .bottom-btn {
-    padding: 6px 10px;
-    font-size: 10px;
-  }
-
-  .shortcuts-hint { display: none; }
-}
-
-/* Very small screens */
-@media (max-width: 380px) {
   .filter-chip {
     font-size: 9px;
-    padding: 3px 7px;
+    padding: 3px 8px;
+  }
+
+  .chip-count { display: none; }
+
+  /* Telemetry panel: bottom sheet style */
+  #telemetry {
+    top: auto;
+    bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+    right: 6px;
+    left: 6px;
+    width: auto;
+    max-height: 45vh;
+    overflow-y: auto;
+    border-radius: 10px 10px 6px 6px;
+  }
+
+  #telemetry.hidden {
+    transform: translateY(10px);
+  }
+
+  .telem-header { padding: 8px 12px 6px; }
+  .telem-header h2 { font-size: 12px; }
+
+  .telem-card { padding: 6px 10px; }
+  .telem-value { font-size: 12px; }
+  .telem-label { font-size: 7px; }
+  .telem-row { padding: 3px 12px; }
+  .telem-row-label, .telem-row-value { font-size: 9px; }
+  .telem-footer { padding: 6px 12px 8px; }
+  .telem-link { font-size: 9px; padding: 5px 0; }
+
+  /* Bottom bar: compact, single row */
+  #bottombar {
+    bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    left: 6px;
+    right: 6px;
+    transform: none;
+    justify-content: center;
+    padding: 4px 5px;
+    gap: 3px;
+    border-radius: 10px;
+  }
+
+  .bottom-group { gap: 3px; }
+
+  .bottom-btn {
+    padding: 7px 8px;
+    font-size: 9px;
+    gap: 3px;
+    border-radius: 6px;
   }
 
   .bottom-btn .btn-label { display: none; }
 
+  .bottom-btn svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .bottom-separator {
+    height: 16px;
+    margin: 0 1px;
+  }
+
+  .shortcuts-hint { display: none; }
+  .color-legend { display: none; }
+}
+
+/* Very small screens (iPhone SE, etc) */
+@media (max-width: 380px) {
+  #topbar { padding: 4px 6px; }
+
+  .logo svg { width: 14px; height: 14px; }
+
+  .topbar-clock { font-size: 9px; }
+
+  .filter-chip {
+    font-size: 8px;
+    padding: 2px 6px;
+  }
+
   .bottom-btn {
-    padding: 8px;
+    padding: 6px 7px;
+  }
+
+  #telemetry {
+    bottom: 50px;
+    max-height: 40vh;
+  }
+
+  .telem-grid { grid-template-columns: 1fr 1fr; }
+  .telem-value { font-size: 11px; }
+}
+
+/* Landscape mobile */
+@media (max-height: 500px) and (max-width: 900px) {
+  #topbar {
+    height: 36px;
+    flex-wrap: nowrap;
+    padding: 0 8px;
+  }
+
+  .topbar-center {
+    order: unset;
+    width: auto;
+    flex-direction: row;
+  }
+
+  .search-container {
+    width: 140px;
+    min-width: 140px;
+  }
+
+  .search-container:focus-within {
+    width: 200px;
+    position: relative;
+    left: unset;
+    right: unset;
+    top: unset;
+  }
+
+  .search-container:focus-within .search-input {
+    opacity: 1;
+    width: 100%;
+  }
+
+  #telemetry {
+    top: 40px;
+    bottom: auto;
+    right: 8px;
+    left: auto;
+    width: 200px;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+  }
+
+  #bottombar {
+    bottom: 4px;
   }
 }

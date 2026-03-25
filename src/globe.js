@@ -28,7 +28,10 @@ export function init(canvas) {
     CONFIG.CAMERA_NEAR,
     CONFIG.CAMERA_FAR
   );
-  camera.position.set(CONFIG.CAMERA_INIT_POS.x, CONFIG.CAMERA_INIT_POS.y, CONFIG.CAMERA_INIT_POS.z);
+  // Zoom out more on small screens so the globe fits nicely
+  const isMobile = window.innerWidth <= 600;
+  const initZ = isMobile ? CONFIG.CAMERA_INIT_POS.z * 1.6 : CONFIG.CAMERA_INIT_POS.z;
+  camera.position.set(CONFIG.CAMERA_INIT_POS.x, CONFIG.CAMERA_INIT_POS.y * (isMobile ? 0.3 : 1), initZ);
 
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
