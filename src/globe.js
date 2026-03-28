@@ -6,6 +6,8 @@ let scene, camera, renderer, controls;
 let earthMesh, sunLight;
 let animatingCamera = false;
 let cameraAnimStart, cameraAnimDuration, cameraFrom, cameraTo;
+let lastCamX = 0, lastCamY = 0, lastCamZ = 0;
+let cameraMovedFlag = true;
 
 export function init(canvas) {
   if (!checkWebGL()) {
@@ -187,7 +189,17 @@ export function updateSunPosition(date) {
 export function render() {
   updateCameraAnimation();
   controls.update();
+  const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
+  if (Math.abs(cx - lastCamX) > 0.01 || Math.abs(cy - lastCamY) > 0.01 || Math.abs(cz - lastCamZ) > 0.01) {
+    cameraMovedFlag = true;
+    lastCamX = cx; lastCamY = cy; lastCamZ = cz;
+  }
   renderer.render(scene, camera);
+}
+
+export function hasCameraMoved() {
+  if (cameraMovedFlag) { cameraMovedFlag = false; return true; }
+  return false;
 }
 
 export function getScene() { return scene; }

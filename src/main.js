@@ -31,6 +31,7 @@ try {
 if (!initError) {
   const scene = Globe.getScene();
   Satellites.initRenderer(scene);
+  Satellites.initMultiOrbitRenderer(scene);
 
   const loadingText = document.getElementById('loading-text');
 
@@ -72,6 +73,12 @@ if (!initError) {
         Satellites.update(simTime);
       }
 
+      // Interpolate satellite positions every frame for smooth movement
+      const t = CONFIG.UPDATE_POSITIONS_MS > 0
+        ? (now - lastPositionUpdate) / CONFIG.UPDATE_POSITIONS_MS
+        : 1;
+      Satellites.interpolatePositions(t);
+
       // Update sun position every 10s (doesn't change fast)
       if (now - lastSunUpdate >= 10000) {
         lastSunUpdate = now;
@@ -84,8 +91,8 @@ if (!initError) {
         UI.updatePanel();
       }
 
-      // Update labels
-      if (now - lastLabelUpdate >= CONFIG.UPDATE_LABELS_MS) {
+      // Update labels only when camera moves
+      if (now - lastLabelUpdate >= CONFIG.UPDATE_LABELS_MS && Globe.hasCameraMoved()) {
         lastLabelUpdate = now;
         UI.updateLabels();
       }

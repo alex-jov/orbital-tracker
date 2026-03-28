@@ -9,7 +9,7 @@
   <meta property="og:description" content="Real-time 3D satellite tracker showing 10,000+ active satellites orbiting Earth.">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰</text></svg>">
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
   <link rel="manifest" href="manifest.json">
   <title>Orbital Tracker</title>
   <link rel="stylesheet" href="style.css">
@@ -28,7 +28,7 @@
     <div class="topbar-left">
       <div class="logo-group">
         <div class="logo" aria-label="Orbital Tracker">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(30 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(-30 12 12)"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg>
+          <svg width="16" height="16" viewBox="0 0 64 64" fill="none" aria-hidden="true"><rect x="24" y="24" width="16" height="16" rx="2" fill="#60a5fa" stroke="#93c5fd" stroke-width="1"/><rect x="2" y="27" width="18" height="10" rx="1" fill="#3b82f6" stroke="#93c5fd" stroke-width="1"/><rect x="44" y="27" width="18" height="10" rx="1" fill="#3b82f6" stroke="#93c5fd" stroke-width="1"/><line x1="8" y1="27" x2="8" y2="37" stroke="#93c5fd" stroke-width="0.5"/><line x1="14" y1="27" x2="14" y2="37" stroke="#93c5fd" stroke-width="0.5"/><line x1="50" y1="27" x2="50" y2="37" stroke="#93c5fd" stroke-width="0.5"/><line x1="56" y1="27" x2="56" y2="37" stroke="#93c5fd" stroke-width="0.5"/><line x1="32" y1="24" x2="32" y2="14" stroke="#93c5fd" stroke-width="1.5"/><circle cx="32" cy="12" r="2.5" fill="none" stroke="#93c5fd" stroke-width="1"/><path d="M26 10 Q22 6 26 2" fill="none" stroke="#60a5fa" stroke-width="1" opacity="0.6"/><path d="M38 10 Q42 6 38 2" fill="none" stroke="#60a5fa" stroke-width="1" opacity="0.6"/></svg>
           <span>ORBITAL TRACKER</span>
         </div>
         <div class="topbar-badge" id="sat-total-badge" aria-live="polite">--</div>
@@ -64,6 +64,10 @@
     </div>
 
     <div class="topbar-right">
+      <button id="btn-theme" class="bottom-btn" aria-label="Toggle light/dark theme" style="padding:4px 8px;">
+        <svg id="theme-icon-dark" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg id="theme-icon-light" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      </button>
       <div class="topbar-clock" id="utc-clock" aria-live="off" aria-label="UTC time">--:--:-- UTC</div>
     </div>
   </header>
@@ -94,14 +98,6 @@
     </div>
     <div class="telem-section">
       <div class="telem-row">
-        <span class="telem-row-label">Visibility</span>
-        <span class="telem-row-value" id="sat-visibility">--</span>
-      </div>
-      <div class="telem-row">
-        <span class="telem-row-label">Elevation</span>
-        <span class="telem-row-value" id="sat-elevation">--</span>
-      </div>
-      <div class="telem-row">
         <span class="telem-row-label">Category</span>
         <span class="telem-row-value" id="sat-category">--</span>
       </div>
@@ -109,15 +105,15 @@
         <span class="telem-row-label">Orbit</span>
         <span class="telem-row-value" id="sat-regime">--</span>
       </div>
-      <div class="telem-row">
-        <span class="telem-row-label">Next pass</span>
-        <span class="telem-row-value" id="sat-next-pass">--</span>
-      </div>
     </div>
     <div class="telem-footer">
+      <button id="btn-sat-details" class="telem-link" aria-label="View orbital elements">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        Details
+      </button>
       <a id="sat-info-link" class="telem-link" href="#" target="_blank" rel="noopener noreferrer" aria-label="View satellite details on N2YO">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-        More info on N2YO
+        N2YO
       </a>
     </div>
   </aside>
@@ -138,6 +134,11 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
         <span class="btn-label">Reset</span>
       </button>
+      <button class="bottom-btn" id="btn-time-pick" aria-label="Set custom date/time">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <span class="btn-label">Date</span>
+      </button>
+      <input type="datetime-local" id="time-picker" class="time-picker-input" aria-label="Custom date and time" style="display:none;">
     </div>
 
     <div class="bottom-separator" aria-hidden="true"></div>
@@ -148,22 +149,27 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="4"/></svg>
         <span class="btn-label">Orbit</span>
       </button>
-      <button class="bottom-btn" id="btn-locate" aria-label="Show your location on the globe">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
-        <span class="btn-label">Locate me</span>
-      </button>
     </div>
   </div>
 
   <!-- Color legend -->
   <div id="color-legend" class="color-legend" aria-label="Satellite category colors"></div>
 
-  <!-- Keyboard shortcuts hint -->
-  <div id="shortcuts-hint" class="shortcuts-hint" aria-hidden="true">
-    <span><kbd>/</kbd> Search</span>
-    <span><kbd>Space</kbd> Pause</span>
-    <span><kbd>O</kbd> Orbit</span>
-    <span><kbd>Esc</kbd> Deselect</span>
+  <!-- Satellite details modal -->
+  <div id="sat-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-label="Satellite details">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-title">Satellite Details</h3>
+        <button id="modal-close" class="modal-close" aria-label="Close modal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-footer" style="padding:10px 16px 14px;border-top:1px solid var(--border);display:flex;gap:6px;">
+        <button id="btn-export-csv" class="telem-link" style="flex:1;">Export CSV</button>
+        <button id="btn-export-json" class="telem-link" style="flex:1;">Export JSON</button>
+      </div>
+    </div>
   </div>
 
   <!-- Error overlay -->
@@ -198,5 +204,10 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/satellite.js@5.0.0/dist/satellite.min.js"></script>
   <script type="module" src="src/main.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  </script>
 </body>
 </html>

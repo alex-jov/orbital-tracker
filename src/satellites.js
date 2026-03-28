@@ -216,9 +216,10 @@ export async function fetchSatellites(groupsToFetch = Object.keys(CONFIG.SATELLI
   const results = [];
   let fetched = 0;
 
-  const fetches = groupsToFetch.map(async (group) => {
+  // Fetch groups sequentially with a delay to avoid Celestrak rate-limiting (403)
+  for (const group of groupsToFetch) {
     const groupConfig = CONFIG.SATELLITE_GROUPS[group];
-    if (!groupConfig) return;
+    if (!groupConfig) continue;
     try {
       const resp = await fetchWithRetry(groupConfig.url);
       const text = await resp.text();
@@ -231,9 +232,11 @@ export async function fetchSatellites(groupsToFetch = Object.keys(CONFIG.SATELLI
       fetched++;
       if (onProgress) onProgress(fetched, groupsToFetch.length, group, 0);
     }
-  });
-
-  await Promise.allSettled(fetches);
+    // Small delay between requests to avoid rate-limiting
+    if (fetched < groupsToFetch.length) {
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
 
   if (results.length === 0) {
     console.warn('All fetches failed — using fallback TLE data');
@@ -274,6 +277,7 @@ export async function fetchSatellites(groupsToFetch = Object.keys(CONFIG.SATELLI
       lastEci: null,
       lastGmst: null,
       position: new THREE.Vector3(),
+      prevPosition: new THREE.Vector3(),
     });
   }
 
@@ -299,6 +303,10 @@ export function update(date) {
 
   for (let i = 0; i < allSatellites.length; i++) {
     const sat = allSatellites[i];
+
+    // Save previous position for interpolation
+    sat.prevPosition.copy(sat.position);
+
     const posVel = satellite.propagate(sat.satrec, date);
     if (!posVel.position || posVel.position === false) continue;
 
@@ -316,15 +324,36 @@ export function update(date) {
 
     const pos = geoTo3D(sat.geodetic.lat, sat.geodetic.lon, sat.geodetic.alt);
     sat.position.copy(pos);
+  }
 
+  markGridDirty();
+}
+
+// ── Position interpolation (called every frame for smooth movement) ────────────
+
+export function interpolatePositions(t) {
+  const ct = Math.max(0, Math.min(1, t));
+  for (let i = 0; i < allSatellites.length; i++) {
+    const sat = allSatellites[i];
     const show = activeCategory === 'all' || sat.category === activeCategory;
-    if (show) {
-      positionsAttr.setXYZ(i, pos.x, pos.y, pos.z);
+    if (show && sat.position.lengthSq() > 0) {
+      // Lerp between previous and current computed positions
+      const px = sat.prevPosition.x, py = sat.prevPosition.y, pz = sat.prevPosition.z;
+      const cx = sat.position.x, cy = sat.position.y, cz = sat.position.z;
+      // If prevPosition is zero (first update), snap to current
+      if (px === 0 && py === 0 && pz === 0) {
+        positionsAttr.setXYZ(i, cx, cy, cz);
+      } else {
+        positionsAttr.setXYZ(i,
+          px + (cx - px) * ct,
+          py + (cy - py) * ct,
+          pz + (cz - pz) * ct
+        );
+      }
     } else {
       positionsAttr.setXYZ(i, 0, 0, 0);
     }
   }
-
   positionsAttr.needsUpdate = true;
 }
 
@@ -337,15 +366,10 @@ export function filterByCategory(category) {
     const sat = allSatellites[i];
     const show = category === 'all' || sat.category === category;
     sizesAttr.setX(i, show ? CONFIG.SAT_SIZE_DEFAULT : CONFIG.SAT_SIZE_HIDDEN);
-    if (show) {
-      positionsAttr.setXYZ(i, sat.position.x, sat.position.y, sat.position.z);
-      visibleCount++;
-    } else {
-      positionsAttr.setXYZ(i, 0, 0, 0);
-    }
+    if (show) visibleCount++;
   }
   sizesAttr.needsUpdate = true;
-  positionsAttr.needsUpdate = true;
+  markGridDirty();
 }
 
 export function getVisibleCount() {
@@ -453,24 +477,69 @@ export function hideGroundTrack() {
   if (groundTrackLine) groundTrackLine.geometry.setDrawRange(0, 0);
 }
 
-// ── Picking ────────────────────────────────────────────────────────────────────
+// ── Spatial grid for picking ─────────────────────────────────────────────────────
 
-export function pickSatellite(raycaster) {
-  const ray = raycaster.ray;
-  let bestDist = Infinity;
-  let bestSat = null;
+const GRID_SIZE = 50; // cell size in world units
+const spatialGrid = new Map(); // "x,y,z" -> [satIndex, ...]
+let gridDirty = true;
 
+function cellKey(x, y, z) {
+  return `${Math.floor(x / GRID_SIZE)},${Math.floor(y / GRID_SIZE)},${Math.floor(z / GRID_SIZE)}`;
+}
+
+function rebuildGrid() {
+  spatialGrid.clear();
   for (let i = 0; i < allSatellites.length; i++) {
     const sat = allSatellites[i];
     if (sat.position.lengthSq() === 0) continue;
     const catVisible = activeCategory === 'all' || sat.category === activeCategory;
     if (!catVisible) continue;
-    const dist = ray.distanceToPoint(sat.position);
-    if (dist < CONFIG.PICK_THRESHOLD && dist < bestDist) {
-      bestDist = dist;
-      bestSat = sat;
+    const key = cellKey(sat.position.x, sat.position.y, sat.position.z);
+    let cell = spatialGrid.get(key);
+    if (!cell) { cell = []; spatialGrid.set(key, cell); }
+    cell.push(i);
+  }
+  gridDirty = false;
+}
+
+function markGridDirty() { gridDirty = true; }
+
+// ── Picking ────────────────────────────────────────────────────────────────────
+
+export function pickSatellite(raycaster) {
+  if (gridDirty) rebuildGrid();
+
+  const ray = raycaster.ray;
+  let bestDist = Infinity;
+  let bestSat = null;
+
+  // Sample points along the ray near the globe
+  const start = ray.origin.clone();
+  const dir = ray.direction.clone();
+  const checked = new Set();
+
+  for (let t = 0; t < 1000; t += GRID_SIZE * 0.5) {
+    const p = start.clone().add(dir.clone().multiplyScalar(t));
+    // Check if we're past the globe zone
+    if (p.length() > GLOBE_RADIUS * CONFIG.CAMERA_MAX_DIST_MULT) continue;
+
+    const key = cellKey(p.x, p.y, p.z);
+    if (checked.has(key)) continue;
+    checked.add(key);
+
+    const cell = spatialGrid.get(key);
+    if (!cell) continue;
+
+    for (const idx of cell) {
+      const sat = allSatellites[idx];
+      const dist = ray.distanceToPoint(sat.position);
+      if (dist < CONFIG.PICK_THRESHOLD && dist < bestDist) {
+        bestDist = dist;
+        bestSat = sat;
+      }
     }
   }
+
   return bestSat;
 }
 
@@ -548,15 +617,57 @@ export function updateLabels(camera, scene) {
 
 export function search(query) {
   if (!query || query.length < 2) return [];
-  const q = query.toUpperCase();
-  const results = [];
-  for (const sat of allSatellites) {
-    if (sat.name.toUpperCase().includes(q)) {
-      results.push(sat);
-      if (results.length >= CONFIG.SEARCH_MAX_RESULTS) break;
+  const q = query.toUpperCase().trim();
+
+  // NORAD ID search (pure numeric)
+  if (/^\d+$/.test(q)) {
+    const results = [];
+    for (const sat of allSatellites) {
+      if (String(sat.satrec.satnum).includes(q)) {
+        results.push(sat);
+        if (results.length >= CONFIG.SEARCH_MAX_RESULTS) break;
+      }
     }
+    return results;
   }
-  return results;
+
+  // Exact substring matches first
+  const exact = [];
+  const fuzzy = [];
+  for (const sat of allSatellites) {
+    const name = sat.name.toUpperCase();
+    if (name.includes(q)) {
+      exact.push(sat);
+    } else if (q.length >= 3) {
+      const dist = levenshtein(q, name.slice(0, q.length + 2));
+      if (dist <= Math.max(1, Math.floor(q.length / 3))) {
+        fuzzy.push({ sat, dist });
+      }
+    }
+    if (exact.length >= CONFIG.SEARCH_MAX_RESULTS) break;
+  }
+
+  fuzzy.sort((a, b) => a.dist - b.dist);
+  const combined = [...exact, ...fuzzy.map(f => f.sat)];
+  return combined.slice(0, CONFIG.SEARCH_MAX_RESULTS);
+}
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  let curr = new Array(n + 1);
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      curr[j] = a[i - 1] === b[j - 1]
+        ? prev[j - 1]
+        : 1 + Math.min(prev[j - 1], prev[j], curr[j - 1]);
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[n];
 }
 
 // ── Accessors ──────────────────────────────────────────────────────────────────
@@ -564,6 +675,135 @@ export function search(query) {
 export function getAll() { return allSatellites; }
 export function getByName(name) { return allSatellites.find(s => s.name === name); }
 export function getCount() { return allSatellites.length; }
+
+export function getOrbitalElements(name) {
+  const sat = getByName(name);
+  if (!sat) return null;
+  const sr = sat.satrec;
+  const RAD2DEG = 180 / Math.PI;
+  const periodMin = (2 * Math.PI) / sr.no;
+  return {
+    noradId: sr.satnum,
+    inclination: (sr.inclo * RAD2DEG).toFixed(4),
+    raan: (sr.nodeo * RAD2DEG).toFixed(4),
+    eccentricity: sr.ecco.toFixed(7),
+    argPerigee: (sr.argpo * RAD2DEG).toFixed(4),
+    meanAnomaly: (sr.mo * RAD2DEG).toFixed(4),
+    meanMotion: sr.no.toFixed(8),
+    periodMin: periodMin.toFixed(2),
+    bstar: sr.bstar.toExponential(5),
+    epochYear: sr.epochyr,
+    epochDay: sr.epochdays.toFixed(4),
+    category: sat.category,
+  };
+}
+
+// ── Multi-selection orbit paths ──────────────────────────────────────────────────
+
+const MAX_MULTI_ORBITS = 5;
+const multiOrbitLines = [];
+
+export function initMultiOrbitRenderer(scene) {
+  for (let i = 0; i < MAX_MULTI_ORBITS; i++) {
+    const positions = new Float32Array(CONFIG.ORBIT_STEPS * 3 + 3);
+    const geo = new THREE.BufferGeometry();
+    const attr = new THREE.Float32BufferAttribute(positions, 3);
+    attr.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('position', attr);
+    geo.setDrawRange(0, 0);
+    const mat = new THREE.LineBasicMaterial({
+      color: CONFIG.ORBIT_COLOR,
+      transparent: true,
+      opacity: CONFIG.ORBIT_OPACITY * 0.7,
+    });
+    const line = new THREE.Line(geo, mat);
+    line.frustumCulled = false;
+    scene.add(line);
+    multiOrbitLines.push({ line, positions, attr });
+  }
+}
+
+export function showMultiOrbitPaths(names, baseDate) {
+  for (let idx = 0; idx < MAX_MULTI_ORBITS; idx++) {
+    const entry = multiOrbitLines[idx];
+    if (idx >= names.length) {
+      entry.line.geometry.setDrawRange(0, 0);
+      continue;
+    }
+    const sat = getByName(names[idx]);
+    if (!sat) { entry.line.geometry.setDrawRange(0, 0); continue; }
+
+    entry.line.material.color.copy(sat.color);
+    const period = (2 * Math.PI) / sat.satrec.no;
+    const steps = CONFIG.ORBIT_STEPS;
+    const stepMin = period / steps;
+    let count = 0;
+
+    for (let i = 0; i <= steps; i++) {
+      const t = new Date(baseDate.getTime() + i * stepMin * 60000);
+      const posVel = satellite.propagate(sat.satrec, t);
+      if (!posVel.position || posVel.position === false) continue;
+      const gmst = satellite.gstime(t);
+      const geo = satellite.eciToGeodetic(posVel.position, gmst);
+      const lat = satellite.degreesLat(geo.latitude);
+      const lon = satellite.degreesLong(geo.longitude);
+      const p = geoTo3D(lat, lon, geo.height);
+      entry.positions[count * 3] = p.x;
+      entry.positions[count * 3 + 1] = p.y;
+      entry.positions[count * 3 + 2] = p.z;
+      count++;
+    }
+    entry.attr.needsUpdate = true;
+    entry.line.geometry.setDrawRange(0, count);
+  }
+}
+
+export function hideMultiOrbitPaths() {
+  for (const entry of multiOrbitLines) {
+    entry.line.geometry.setDrawRange(0, 0);
+  }
+}
+
+export function highlightMultiple(names) {
+  for (let i = 0; i < allSatellites.length; i++) {
+    const sat = allSatellites[i];
+    const catVisible = activeCategory === 'all' || sat.category === activeCategory;
+    if (!catVisible) { sizesAttr.setX(i, CONFIG.SAT_SIZE_HIDDEN); continue; }
+    sizesAttr.setX(i, names.has(sat.name) ? CONFIG.SAT_SIZE_HIGHLIGHTED : CONFIG.SAT_SIZE_DEFAULT);
+  }
+  sizesAttr.needsUpdate = true;
+}
+
+// ── Ephemeris export ────────────────────────────────────────────────────────────
+
+export function generateEphemeris(name, startDate, durationHours = 24, stepMin = 1) {
+  const sat = getByName(name);
+  if (!sat) return null;
+  const points = [];
+  const totalSteps = Math.floor((durationHours * 60) / stepMin);
+  for (let i = 0; i <= totalSteps; i++) {
+    const t = new Date(startDate.getTime() + i * stepMin * 60000);
+    const posVel = satellite.propagate(sat.satrec, t);
+    if (!posVel.position || posVel.position === false) continue;
+    const gmst = satellite.gstime(t);
+    const geo = satellite.eciToGeodetic(posVel.position, gmst);
+    const vel = posVel.velocity;
+    points.push({
+      time: t.toISOString(),
+      lat: satellite.degreesLat(geo.latitude),
+      lon: satellite.degreesLong(geo.longitude),
+      alt: geo.height,
+      speed: Math.sqrt(vel.x ** 2 + vel.y ** 2 + vel.z ** 2),
+    });
+  }
+  return points;
+}
+
+export function ephemerisToCSV(points) {
+  const header = 'time,lat,lon,alt_km,speed_km_s';
+  const rows = points.map(p => `${p.time},${p.lat.toFixed(4)},${p.lon.toFixed(4)},${p.alt.toFixed(1)},${p.speed.toFixed(4)}`);
+  return header + '\n' + rows.join('\n');
+}
 
 // Category counts for filter chips
 export function getCategoryCounts() {

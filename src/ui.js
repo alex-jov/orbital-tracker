@@ -2,15 +2,13 @@ import * as THREE from 'three';
 import * as Satellites from './satellites.js';
 import * as Utils from './utils.js';
 import * as Globe from './globe.js';
-import { CONFIG, debounce, throttle, formatCoord, formatAlt, formatSpeed, computeNextPass, formatRelativeTime, getOrbitRegime } from './utils.js';
+import { CONFIG, debounce, throttle, formatCoord, formatAlt, formatSpeed, getOrbitRegime } from './utils.js';
 
 // ── State ──────────────────────────────────────────────────────────────────────
 
 let selectedSatName = null;
+const selectedSats = new Set(); // multi-selection
 let selectedCategory = 'all';
-let userLocation = null;
-let userMarker = null;
-let userToSatLine = null;
 let showOrbit = false;
 
 // Time simulation
@@ -36,14 +34,11 @@ export function init(scene) {
   el.satLon = document.getElementById('sat-lon');
   el.satAlt = document.getElementById('sat-alt');
   el.satSpeed = document.getElementById('sat-speed');
-  el.satVisibility = document.getElementById('sat-visibility');
-  el.satElevation = document.getElementById('sat-elevation');
   el.satCategoryVal = document.getElementById('sat-category');
   el.satTotalBadge = document.getElementById('sat-total-badge');
   el.satInfoLink = document.getElementById('sat-info-link');
   el.telemetry = document.getElementById('telemetry');
   el.btnOrbits = document.getElementById('btn-orbits');
-  el.btnLocate = document.getElementById('btn-locate');
   el.loading = document.getElementById('loading');
   el.utcClock = document.getElementById('utc-clock');
   el.searchInput = document.getElementById('search-input');
@@ -55,7 +50,6 @@ export function init(scene) {
   el.btnTimeReset = document.getElementById('btn-time-reset');
   el.errorOverlay = document.getElementById('error-overlay');
   el.satOrbitRegime = document.getElementById('sat-regime');
-  el.satNextPass = document.getElementById('sat-next-pass');
   el.legend = document.getElementById('color-legend');
 
   // Hide telemetry on start
@@ -68,9 +62,6 @@ export function init(scene) {
 
   // Orbit toggle
   el.btnOrbits.addEventListener('click', toggleOrbit);
-
-  // Locate
-  el.btnLocate.addEventListener('click', requestUserLocation);
 
   // Filter chips — generate from CONFIG
   initFilterChips();
@@ -100,7 +91,28 @@ export function init(scene) {
       raycaster.setFromCamera(mouse, Globe.getCamera());
       const picked = Satellites.pickSatellite(raycaster);
       if (picked) {
-        selectSatellite(picked.name);
+        if (e.ctrlKey || e.metaKey) {
+          // Multi-select toggle
+          if (selectedSats.has(picked.name)) {
+            selectedSats.delete(picked.name);
+          } else {
+            selectedSats.add(picked.name);
+          }
+          selectedSatName = picked.name;
+          Satellites.highlightMultiple(selectedSats);
+          el.telemetry.classList.remove('hidden');
+          el.btnOrbits.removeAttribute('disabled');
+          el.btnOrbits.setAttribute('aria-disabled', 'false');
+          if (showOrbit) {
+            Satellites.showMultiOrbitPaths([...selectedSats], getSimTime());
+          }
+          updatePanel();
+        } else {
+          selectedSats.clear();
+          selectedSats.add(picked.name);
+          Satellites.hideMultiOrbitPaths();
+          selectSatellite(picked.name);
+        }
       } else {
         deselectSatellite();
       }
@@ -111,17 +123,11 @@ export function init(scene) {
   // Keyboard shortcuts
   document.addEventListener('keydown', onKeyDown);
 
-  // User-to-satellite line
-  const lineGeo = new THREE.BufferGeometry();
-  lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3));
-  const lineMat = new THREE.LineBasicMaterial({
-    color: CONFIG.USER_LINE_VISIBLE_COLOR,
-    transparent: true,
-    opacity: 0.4,
-  });
-  userToSatLine = new THREE.Line(lineGeo, lineMat);
-  userToSatLine.visible = false;
-  scene.add(userToSatLine);
+  // Theme toggle
+  initTheme();
+
+  // Details modal
+  initDetailsModal();
 
   // UTC clock
   setInterval(updateClock, 1000);
@@ -305,7 +311,33 @@ function initTimeControls() {
     el.btnTimePause.classList.remove('active');
     el.btnTimePause.querySelector('.btn-label').textContent = 'Pause';
     el.btnTimeSpeed.querySelector('.btn-label').textContent = '1x';
+    const picker = document.getElementById('time-picker');
+    if (picker) picker.style.display = 'none';
   });
+
+  // Date/time picker
+  const btnPick = document.getElementById('btn-time-pick');
+  const picker = document.getElementById('time-picker');
+  if (btnPick && picker) {
+    btnPick.addEventListener('click', () => {
+      const visible = picker.style.display !== 'none';
+      if (visible) {
+        picker.style.display = 'none';
+      } else {
+        const now = getSimTime();
+        picker.value = now.toISOString().slice(0, 16);
+        picker.style.display = '';
+        picker.focus();
+      }
+    });
+    picker.addEventListener('change', () => {
+      const target = new Date(picker.value + 'Z');
+      if (!isNaN(target.getTime())) {
+        simTimeOffset = target.getTime() - Date.now();
+        lastRealTime = performance.now();
+      }
+    });
+  }
 }
 
 // ── Keyboard shortcuts ─────────────────────────────────────────────────────────
@@ -331,6 +363,32 @@ function onKeyDown(e) {
     case ' ':
       e.preventDefault();
       el.btnTimePause.click();
+      break;
+    // Globe keyboard navigation
+    case 'ArrowLeft':
+      e.preventDefault();
+      rotateGlobe(0.05, 0);
+      break;
+    case 'ArrowRight':
+      e.preventDefault();
+      rotateGlobe(-0.05, 0);
+      break;
+    case 'ArrowUp':
+      e.preventDefault();
+      rotateGlobe(0, -0.05);
+      break;
+    case 'ArrowDown':
+      e.preventDefault();
+      rotateGlobe(0, 0.05);
+      break;
+    case '+':
+    case '=':
+      e.preventDefault();
+      zoomGlobe(-10);
+      break;
+    case '-':
+      e.preventDefault();
+      zoomGlobe(10);
       break;
   }
 }
@@ -370,17 +428,16 @@ export function selectSatellite(name) {
   // Always show ground track
   Satellites.showGroundTrack(name, getSimTime());
 
-  // Compute next pass (async-like, in background)
-  computeNextPassForSelected();
-
   saveState();
 }
 
 export function deselectSatellite() {
-  if (!selectedSatName) return;
+  if (!selectedSatName && selectedSats.size === 0) return;
   selectedSatName = null;
+  selectedSats.clear();
   Satellites.clearHighlight();
   Satellites.hideOrbitPath();
+  Satellites.hideMultiOrbitPaths();
   Satellites.hideGroundTrack();
   Satellites.setHover(null);
   el.telemetry.classList.add('hidden');
@@ -388,7 +445,6 @@ export function deselectSatellite() {
   el.btnOrbits.classList.remove('active');
   el.btnOrbits.setAttribute('disabled', '');
   el.btnOrbits.setAttribute('aria-disabled', 'true');
-  if (userToSatLine) userToSatLine.visible = false;
 
   // Clear URL hash
   history.replaceState(null, '', window.location.pathname);
@@ -401,8 +457,12 @@ function toggleOrbit() {
   el.btnOrbits.classList.toggle('active', showOrbit);
   if (showOrbit) {
     Satellites.showOrbitPath(selectedSatName, getSimTime());
+    if (selectedSats.size > 1) {
+      Satellites.showMultiOrbitPaths([...selectedSats].filter(n => n !== selectedSatName), getSimTime());
+    }
   } else {
     Satellites.hideOrbitPath();
+    Satellites.hideMultiOrbitPaths();
   }
 }
 
@@ -424,109 +484,15 @@ export function updatePanel() {
   if (el.satOrbitRegime) el.satOrbitRegime.textContent = getOrbitRegime(sat.geodetic.alt);
   el.satInfoLink.href = 'https://www.n2yo.com/satellite/?s=' + noradId;
 
-  // Update orbit path if time warp is active
-  if (showOrbit && timeMultiplier !== 1) {
+  // Refresh orbit path and ground track if visible
+  if (showOrbit) {
     Satellites.showOrbitPath(selectedSatName, getSimTime());
   }
-
-  if (userLocation && sat.lastEci && sat.lastGmst) {
-    const vis = Utils.isVisible(userLocation.lat, userLocation.lon, userLocation.alt || 0, sat.lastEci, sat.lastGmst);
-    if (vis.visible) {
-      el.satVisibility.textContent = 'ABOVE HORIZON';
-      el.satVisibility.className = 'telem-row-value visible-yes';
-    } else {
-      el.satVisibility.textContent = 'Below horizon';
-      el.satVisibility.className = 'telem-row-value visible-no';
-    }
-    el.satElevation.textContent = vis.elevation.toFixed(1) + '\u00B0';
-    updateUserLine(sat, vis.visible);
-  } else {
-    el.satVisibility.textContent = 'Click Locate me';
-    el.satVisibility.className = 'telem-row-value';
-    el.satElevation.textContent = '--';
-    if (userToSatLine) userToSatLine.visible = false;
-  }
+  Satellites.showGroundTrack(selectedSatName, getSimTime());
 }
 
 export function updateLabels() {
   Satellites.updateLabels(Globe.getCamera(), Globe.getScene());
-}
-
-// ── User location ──────────────────────────────────────────────────────────────
-
-function updateUserLine(sat, visible) {
-  if (!userLocation || !userToSatLine) return;
-  const userPos = Utils.geoToSurface(userLocation.lat, userLocation.lon);
-  const attr = userToSatLine.geometry.attributes.position;
-  attr.setXYZ(0, userPos.x, userPos.y, userPos.z);
-  attr.setXYZ(1, sat.position.x, sat.position.y, sat.position.z);
-  attr.needsUpdate = true;
-  userToSatLine.visible = visible;
-  userToSatLine.material.color.set(visible ? CONFIG.USER_LINE_VISIBLE_COLOR : CONFIG.USER_LINE_HIDDEN_COLOR);
-  userToSatLine.material.opacity = visible ? 0.4 : 0.15;
-}
-
-async function requestUserLocation() {
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setUserLocation(pos.coords.latitude, pos.coords.longitude, (pos.coords.altitude || 0) / 1000);
-      },
-      () => {
-        fallbackIPLocation();
-      },
-      { timeout: 5000, enableHighAccuracy: false }
-    );
-  } else {
-    fallbackIPLocation();
-  }
-}
-
-async function fallbackIPLocation() {
-  const apis = [
-    'https://ipapi.co/json/',
-    'https://ip-api.com/json/?fields=lat,lon',
-  ];
-  for (const url of apis) {
-    try {
-      const resp = await Utils.fetchWithTimeout(url, 5000);
-      if (!resp.ok) continue;
-      const data = await resp.json();
-      const lat = data.latitude || data.lat;
-      const lon = data.longitude || data.lon;
-      if (lat && lon) {
-        setUserLocation(lat, lon, 0);
-        return;
-      }
-    } catch { continue; }
-  }
-  // Paris fallback
-  setUserLocation(48.8566, 2.3522, 0);
-}
-
-function setUserLocation(lat, lon, altKm) {
-  userLocation = { lat, lon, alt: altKm };
-  const scene = Globe.getScene();
-  if (userMarker) scene.remove(userMarker);
-
-  const pos = Utils.geoToSurface(lat, lon);
-  const geo = new THREE.SphereGeometry(1.0, 12, 12);
-  const mat = new THREE.MeshBasicMaterial({ color: CONFIG.USER_MARKER_COLOR });
-  userMarker = new THREE.Mesh(geo, mat);
-  userMarker.position.copy(pos);
-  scene.add(userMarker);
-
-  const spriteMat = new THREE.SpriteMaterial({
-    color: CONFIG.USER_MARKER_COLOR,
-    transparent: true,
-    opacity: 0.3,
-    blending: THREE.AdditiveBlending,
-  });
-  const glow = new THREE.Sprite(spriteMat);
-  glow.scale.set(5, 5, 1);
-  userMarker.add(glow);
-
-  el.btnLocate.classList.add('active');
 }
 
 // ── Loading & errors ───────────────────────────────────────────────────────────
@@ -541,34 +507,6 @@ export function showError(message) {
     el.errorOverlay.querySelector('.error-text').textContent = message;
     el.errorOverlay.classList.remove('hidden');
   }
-}
-
-// ── Next pass prediction ────────────────────────────────────────────────────────
-
-let nextPassResult = null;
-
-function computeNextPassForSelected() {
-  if (!selectedSatName || !userLocation) {
-    if (el.satNextPass) el.satNextPass.textContent = 'Locate me first';
-    return;
-  }
-  const sat = Satellites.getByName(selectedSatName);
-  if (!sat) return;
-
-  if (el.satNextPass) el.satNextPass.textContent = 'Computing...';
-
-  // Run in a setTimeout to avoid blocking the frame
-  setTimeout(() => {
-    const now = getSimTime();
-    const pass = computeNextPass(sat.satrec, userLocation.lat, userLocation.lon, userLocation.alt || 0, now);
-    if (pass) {
-      nextPassResult = pass;
-      if (el.satNextPass) el.satNextPass.textContent = formatRelativeTime(pass, now) + ' (' + pass.toISOString().slice(11, 16) + ' UTC)';
-    } else {
-      nextPassResult = null;
-      if (el.satNextPass) el.satNextPass.textContent = 'None in 24h';
-    }
-  }, 10);
 }
 
 // ── Color legend ────────────────────────────────────────────────────────────────
@@ -603,6 +541,130 @@ export function getSimTime() {
 
 export function getTimeMultiplier() { return timeMultiplier; }
 export function getSelectedSatName() { return selectedSatName; }
+
+// ── Satellite details modal ──────────────────────────────────────────────────────
+
+function initDetailsModal() {
+  const btn = document.getElementById('btn-sat-details');
+  const modal = document.getElementById('sat-modal');
+  const closeBtn = document.getElementById('modal-close');
+  if (!btn || !modal) return;
+
+  btn.addEventListener('click', () => {
+    if (!selectedSatName) return;
+    const elems = Satellites.getOrbitalElements(selectedSatName);
+    if (!elems) return;
+
+    document.getElementById('modal-title').textContent = selectedSatName;
+    const body = document.getElementById('modal-body');
+    body.innerHTML = [
+      ['NORAD ID', elems.noradId],
+      ['Inclination', elems.inclination + '\u00B0'],
+      ['RAAN', elems.raan + '\u00B0'],
+      ['Eccentricity', elems.eccentricity],
+      ['Arg. of Perigee', elems.argPerigee + '\u00B0'],
+      ['Mean Anomaly', elems.meanAnomaly + '\u00B0'],
+      ['Mean Motion', elems.meanMotion + ' rad/min'],
+      ['Period', elems.periodMin + ' min'],
+      ['B* Drag', elems.bstar],
+      ['Epoch', elems.epochYear + '/' + elems.epochDay],
+      ['Category', CONFIG.SATELLITE_GROUPS[elems.category]?.label || elems.category],
+    ].map(([label, value]) =>
+      `<div class="modal-row"><span class="modal-row-label">${escapeHtml(label)}</span><span class="modal-row-value">${escapeHtml(String(value))}</span></div>`
+    ).join('');
+
+    modal.classList.remove('hidden');
+  });
+
+  closeBtn.addEventListener('click', () => modal.classList.add('hidden'));
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) modal.classList.add('hidden');
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+      modal.classList.add('hidden');
+    }
+  });
+
+  // Export buttons
+  document.getElementById('btn-export-csv')?.addEventListener('click', () => {
+    if (!selectedSatName) return;
+    const points = Satellites.generateEphemeris(selectedSatName, getSimTime(), 24, 1);
+    if (!points) return;
+    downloadFile(Satellites.ephemerisToCSV(points), selectedSatName.replace(/\s+/g, '_') + '_ephemeris.csv', 'text/csv');
+  });
+  document.getElementById('btn-export-json')?.addEventListener('click', () => {
+    if (!selectedSatName) return;
+    const points = Satellites.generateEphemeris(selectedSatName, getSimTime(), 24, 1);
+    if (!points) return;
+    downloadFile(JSON.stringify({ satellite: selectedSatName, ephemeris: points }, null, 2), selectedSatName.replace(/\s+/g, '_') + '_ephemeris.json', 'application/json');
+  });
+}
+
+function downloadFile(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Globe keyboard navigation ────────────────────────────────────────────────────
+
+function rotateGlobe(dTheta, dPhi) {
+  const controls = Globe.getControls();
+  const camera = Globe.getCamera();
+  const offset = camera.position.clone().sub(controls.target);
+  const r = offset.length();
+  let theta = Math.atan2(offset.x, offset.z) + dTheta;
+  let phi = Math.acos(Math.max(-1, Math.min(1, offset.y / r))) + dPhi;
+  phi = Math.max(0.1, Math.min(Math.PI - 0.1, phi));
+  camera.position.set(
+    controls.target.x + r * Math.sin(phi) * Math.sin(theta),
+    controls.target.y + r * Math.cos(phi),
+    controls.target.z + r * Math.sin(phi) * Math.cos(theta)
+  );
+  camera.lookAt(controls.target);
+}
+
+function zoomGlobe(delta) {
+  const camera = Globe.getCamera();
+  const controls = Globe.getControls();
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  const newPos = camera.position.clone().add(dir.multiplyScalar(delta));
+  const dist = newPos.distanceTo(controls.target);
+  if (dist >= controls.minDistance && dist <= controls.maxDistance) {
+    camera.position.copy(newPos);
+  }
+}
+
+// ── Theme toggle ────────────────────────────────────────────────────────────────
+
+function initTheme() {
+  const btn = document.getElementById('btn-theme');
+  const iconDark = document.getElementById('theme-icon-dark');
+  const iconLight = document.getElementById('theme-icon-light');
+  if (!btn) return;
+
+  // Restore saved theme
+  try {
+    const saved = localStorage.getItem('ot_theme');
+    if (saved === 'light') {
+      document.documentElement.classList.add('light');
+      iconDark.style.display = 'none';
+      iconLight.style.display = '';
+    }
+  } catch {}
+
+  btn.addEventListener('click', () => {
+    const isLight = document.documentElement.classList.toggle('light');
+    iconDark.style.display = isLight ? 'none' : '';
+    iconLight.style.display = isLight ? '' : 'none';
+    try { localStorage.setItem('ot_theme', isLight ? 'light' : 'dark'); } catch {}
+  });
+}
 
 // ── Persistence ────────────────────────────────────────────────────────────────
 
